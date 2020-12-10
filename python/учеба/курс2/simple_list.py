@@ -10,9 +10,7 @@ class SLL:
         self.head = None
         if some is None:
             return
-        try:
-            iter(some)
-        except:
+        if not hasattr(some, '__iter__'):
             raise TypeError('Только итеративные объекты')
         for ai in some:
             self.append(ai)
