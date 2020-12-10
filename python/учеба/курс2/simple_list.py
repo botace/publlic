@@ -81,34 +81,34 @@ class SLL:
         return False
 
 
+if __name__ == '__main__':
+    a = SLL()
+    a.append(5)
+    print(a)
+    a.remove(5)
+    print(a)
+    a.append(5)
+    a.append(10)
+    a.append('hello')
+    a.append(-123)
+    print(a)
+    print(len(a))
 
-a = SLL()
-a.append(5)
-print(a)
-a.remove(5)
-print(a)
-a.append(5)
-a.append(10)
-a.append('hello')
-a.append(-123)
-print(a)
-print(len(a))
+    b = SLL(a)
+    b.append(999)
+    print(b)
+    b.remove('hello')
+    print(b)
 
-b = SLL(a)
-b.append(999)
-print(b)
-b.remove('hello')
-print(b)
+    print(a[0])
+    print(a[3])
 
-print(a[0])
-print(a[3])
+    print(a[-3])
+    print(a[-1])
 
-print(a[-3])
-print(a[-1])
+    print(-123 in a)
+    print('hello' in a)
+    print(100 in a)
 
-print(-123 in a)
-print('hello' in a)
-print(100 in a)
-
-d = [ai for ai in a]
-print(d)
+    d = [ai for ai in a]
+    print(d)
