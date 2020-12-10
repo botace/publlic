@@ -14,14 +14,17 @@ class IterableInt(int):
                 return True
         return False
 
-    def slice_to_list(self, slice_obj):
+    def __get_slice(self, slice_obj):
         if not isinstance(slice_obj, slice):
             raise TypeError('Допустим только тип slice', type(slice_obj))
-        raise NotImplementedError
+        st = str(self)[::-1][slice_obj.start: slice_obj.stop: slice_obj.step]
+        if len(st):
+            return int(st)
+        raise ValueError( 'Недопустимые значения slice')
 
     def __getitem__(self, idx):
         if isinstance( idx, slice):
-            return self.slice_to_list( idx)
+            return self.__get_slice( idx)
 
         if not isinstance(idx, int):
             raise TypeError('Индекс должен быть целым числом')
