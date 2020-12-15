@@ -91,7 +91,7 @@ class Currency:
                     nominal = record.find('Value').text
                     nominal = int(nominal) if len(nominal) and nominal.isdigit() else 1
                     value = record.find('Value').text
-                    self.db[self.cnv_date(record.attrib['Date'])] = self.str2float(value) / nominal
+                    self.db[self.cnv_date(record.attrib['Date'])] = utils.str2float(value) / nominal
                     converted += 1
 
                     if self.trace:
@@ -102,7 +102,7 @@ class Currency:
                     if self.trace:
                         print('History: Обновления истории нет')
                     self.date_ask = datetime.date.today()  # когда запрашивали
-                    with open(db_filename, 'wb') as db_file:
+                    with open(db_filename, 'wb') as db_file:  # но необходимо обновить дату опроса ЦБ
                         pickle.dump(self.date_ask, db_file)
                         pickle.dump(self.date_s, db_file)
                         pickle.dump(self.date_e, db_file)
@@ -131,20 +131,11 @@ class Currency:
         def cnv_date(date_str: str):
             return parser.parse(date_str, dayfirst=True).date()
 
-        @staticmethod
-        def str2float(st: str):
-            if not st.replace(',', '').isdigit():
-                return float(0)
-            return float(st.replace(',', '.'))
-
     def __init__(self, for_currency: str, **kwargs):
         self.trace = False
-        self.precision = None
 
         for kw_key, kw_value in kwargs.items():
-            if kw_key == 'precision' and type(kw_value) == int and 0 <= kw_value < 21:
-                self.precision = kw_value
-            elif kw_key == 'trace' and type(kw_value) == bool:
+            if kw_key == 'trace' and type(kw_value) == bool:
                 self.trace = kw_value
 
         if self.trace:
@@ -195,16 +186,33 @@ class Currency:
     def __convert_date(date_str):
         return parser.parse(date_str, dayfirst=True).date()
 
+    def get_period(self, date_s='', date_e=''):
+        """ Выдаём словарь за период
+            date_s/date_e - datetime.date or str
+        """
+        if isinstance(date_s, datetime.date):
+            _date_s = date_s
+        elif isinstance(date_s, str):
+            _date_s = self.__convert_date(date_s) if len(date_s) else self.date_min
+        else:
+            raise TypeError('Работаем только с str и datetime.date')
+        if isinstance(date_e, datetime.date):
+            _date_e = date_e
+        elif isinstance(date_e, str):
+            _date_e = self.__convert_date(date_e) if len(date_e) else self.date_max
+        else:
+            raise TypeError('Работаем только с str и datetime.date')
+
+        dates = list(filter(lambda key: _date_s <= key <= _date_e, self.__rates.db.keys()))
+        return {_date: self.__rates.db[_date] for _date in dates}
+
     def __getitem__(self, some):
         if isinstance(some, datetime.date):  # умеем выдавать значение по datetime.data
             _date = some
         elif isinstance(some, str):
             dates_range = some.split(':')
             if len(dates_range) == 2:  # умеем выдавать словарь за период из строки '1 dec:' or '01.01:31.01'
-                _date_s = self.__convert_date(dates_range[0]) if len(dates_range[0]) else self.date_min
-                _date_e = self.__convert_date(dates_range[1]) if len(dates_range[1]) else self.date_max
-                slice_dates = list(filter(lambda key: _date_s <= key <= _date_e, self.__rates.db.keys()))
-                return {_date: self.__rates.db[_date] for _date in slice_dates}
+                return self.get_period(dates_range[0], dates_range[1])
             else:
                 _date = self.__convert_date(some)  # умеем выдавать значение по дате в строке '2 feb 2019'
         elif isinstance(some, slice):  # умеем выдавать словарь дата:курс по срезу
@@ -243,29 +251,29 @@ if __name__ == '__main__':
     import pandas as pd
     
     currencies = []
-    curr_dict = CurrDB().find()  # все валюты
+    curr_dict = CurrDB(trace=True).find()  # все валюты
     for curr_id, curr_info in curr_dict.items():
         iso_code = curr_info['ISO']
         rus_name = curr_info['RUSNAME']
         curr_num = curr_info['NUM']
         print(f'\nОбрабатываем запрос для: Currency(\'{curr_id}\') \'{iso_code}\':{curr_num}:\'{rus_name}\'')
-        currencies.append(Currency(curr_id, precision=2, trace=True))
+        currencies.append(Currency(curr_id, trace=True))
 
     xls_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     need_save = ['USD', 'EUR']
-    date = datetime.date.today() - datetime.timedelta(days=180)
-    print(f'Создаём файлы .xlsx для:{need_save} за последние полгода...')
+    print(f'\nСоздаём файлы .xlsx для:{need_save} за последние полгода...')
+
     for currency in currencies:
         if currency.iso_code in need_save:
-            delta = float(0)
+            delta = None
             col_rate = f'Курс {currency.iso_code}'
             db = {'Дата': [], col_rate: [], 'Дельта': []}
-            for k, v in currency:
-                delta = v - delta
-                if k > date:
-                    db['Дата'].append(k)
-                    db[col_rate].append(v)
-                    db['Дельта'].append(delta)
+            rates = currency.get_period(datetime.date.today() - datetime.timedelta(days=180))
+            for k, v in rates.items():
+                delta = v - delta if delta is not None else 0
+                db['Дата'].append(k)
+                db[col_rate].append(v)
+                db['Дельта'].append(float(delta))
                 delta = v
             df = pd.DataFrame(db)
             df.to_excel(xls_dir + f'\\{currency.iso_code}.xlsx', sheet_name='Rates', index=False)

@@ -6,6 +6,7 @@ import xml.etree.ElementTree as Xml
 import os
 import requests
 import pickle
+import utils
 
 
 class CurrenciesDB:
@@ -50,12 +51,6 @@ class CurrenciesDB:
             with open(filename, 'w') as xmlfile:
                 xmlfile.write(resp.text)
 
-    @staticmethod
-    def __str_to_int(st: str, default=None):
-        if type(st) == str and len(st) and st.isdigit():
-            return int(st)
-        return default
-
     def __convert_xmlfile_to_dict(self, filename: str):
         db = {}
         data = Xml.parse(filename)
@@ -65,10 +60,10 @@ class CurrenciesDB:
         for item in data.getroot():
             db[item.get('ID')] = {
                 'ISO': item.find('ISO_Char_Code').text,
-                'NUM': self.__str_to_int(item.find('ISO_Num_Code').text),
+                'NUM': utils.str2int(item.find('ISO_Num_Code').text, None),
                 'ENGNAME': item.find('EngName').text,
                 'RUSNAME': item.find('Name').text,
-                'NOMINAL': self.__str_to_int(item.find('Nominal').text),
+                'NOMINAL': utils.str2int(item.find('Nominal').text, None),
                 }
             converted += 1
         if self.trace:
@@ -109,15 +104,6 @@ class CurrenciesDB:
             db_size = len(CurrenciesDB.__db)
         if self.trace:
             print(f'CurrenciesDB: Размер словаря - {db_size}')
-
-    @staticmethod
-    def __istype_in(obj, need_type=None):
-        if need_type is None:
-            need_type = type(obj[0])
-        for item in obj:
-            if type(item) != need_type:
-                return False
-        return True
 
     def find(self, some=None):
         """ Метод из some строит список с разделителем ' '
@@ -208,7 +194,6 @@ if __name__ == '__main__':
     import pprint
 
     info = CurrenciesDB(trace=True)
-    # pprint.pp(info._CurrenciesDB__db)
     test_st = r'R01820 iso:usd eur EngName:[\w\W]+Dollar юань'
     print(f'Тестовая строка поиска:\'{test_st}\'')
     pprint.pp(info.find(test_st))
