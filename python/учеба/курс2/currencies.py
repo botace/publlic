@@ -36,7 +36,14 @@ class CurrenciesDB:
         url = r'http://www.cbr.ru/scripts/XML_valFull.asp'
         if self.trace:
             print('CurrenciesDB: Запрашиваем список валют у сервера ЦБ')
-        resp = requests.get(url)
+
+        try:
+            resp = requests.get(url)
+        except:
+            if self.trace:
+                print('CurrenciesDB: Ошибка обращения к серверу ЦБ')
+            return
+
         if self.trace:
             print(f'CurrenciesDB: {resp.status_code}')
         if resp.status_code == 200 and len(resp.text):
@@ -76,7 +83,7 @@ class CurrenciesDB:
         if CurrenciesDB.__db_loaded is True:
             return
 
-        # db = {}
+        db = {}
         module_dir = os.path.dirname(os.path.abspath(__file__))
         module_dir += r'\currencies'
         if not os.path.isdir(module_dir):
@@ -86,9 +93,10 @@ class CurrenciesDB:
             xml_filename = module_dir + r'\cbr_valFull.xml'
             if not os.path.isfile(xml_filename):
                 self.__create_file_cbr_val(xml_filename)
-            db = self.__convert_xmlfile_to_dict(xml_filename)
-            with open(db_filename, 'wb') as db_file:
-                pickle.dump(db, db_file)
+            if os.path.isfile(xml_filename):  # если удалось загрузить данные с ЦБ
+                db = self.__convert_xmlfile_to_dict(xml_filename)
+                with open(db_filename, 'wb') as db_file:
+                    pickle.dump(db, db_file)
         else:
             with open(db_filename, 'rb') as db_file:
                 db = pickle.load(db_file)

@@ -30,8 +30,9 @@ class Currency:
             self.trace = trace
             self.arch_dir = arch_dir
             self.curr_id = currid
-            self.date_s = datetime.date(1900, 1, 1)
-            self.date_e = datetime.date.today()
+            self.date_ask = None
+            self.date_s = None
+            self.date_e = None
             self.db = dict()
             self.load_db()
 
@@ -43,14 +44,20 @@ class Currency:
                 self.update_db(db_filename, datetime.date(1900, 1, 1), datetime.date.today())
             else:
                 with open(db_filename, 'rb') as dbfile:
+                    self.date_ask = pickle.load(dbfile)
                     self.date_s = pickle.load(dbfile)
                     self.date_e = pickle.load(dbfile)
                     self.db = pickle.load(dbfile)
-                if self.date_e < datetime.date.today():
-                    self.update_db(db_filename, self.date_e, datetime.date.today())
+                    if self.trace:
+                        print(f'History: Файл с историей от {self.date_ask} для периода {self.date_s}:{self.date_e}')
+
+                if self.date_ask < datetime.date.today():
+                    if self.trace:
+                        print(f'History: Файл с историей устарел - пытаемся обновить историю')
+                    self.update_db(db_filename, self.date_e + datetime.timedelta(days=1), datetime.date.today())
                 else:
                     if self.trace:
-                        print(f'History: Файл с историей \'{self.curr_id}\' уже есть - подгрузили в память')
+                        print(f'History: Файл с историей актуален')
 
         def update_db(self, db_filename: str, date_s, date_e):
             url = r'http://www.cbr.ru/scripts/XML_dynamic.asp'
@@ -61,11 +68,22 @@ class Currency:
                 print(f'History: Запрашиваем историю для {self.curr_id} {date_start}:{date_end} у сервера ЦБ')
 
             params = {'VAL_NM_RQ': self.curr_id, 'date_req1': date_start, 'date_req2': date_end}
-            resp = requests.get(url, params)
+
+            try:
+                resp = requests.get(url, params)
+            except:
+                if self.trace:
+                    print('History: Ошибка обращения к серверу ЦБ')
+                return
+
             if self.trace:
-                print(f'History: {resp.status_code}')
+                print(f'History: responce code is {resp.status_code}')
 
             if resp.status_code == 200 and len(resp.text):
+
+                # with open(db_filename + '.xml', 'w') as xmlfile:
+                #    xmlfile.write(resp.text)
+
                 converted = 0
                 xml_tree = Xml.fromstring(resp.text)
                 xml_tree_len = len(xml_tree)
@@ -73,23 +91,39 @@ class Currency:
                     nominal = record.find('Value').text
                     nominal = int(nominal) if len(nominal) and nominal.isdigit() else 1
                     value = record.find('Value').text
-                    self.db[self.cnv_date(record.attrib['Date'])] = self.cnv_to_float(value) / nominal
+                    self.db[self.cnv_date(record.attrib['Date'])] = self.str2float(value) / nominal
                     converted += 1
 
                     if self.trace:
                         percent = int(converted / xml_tree_len * 100)
                         utils.pbprint('History', percent, f'записей {converted}')
-                    
-                date_e = self.cnv_date(xml_tree.attrib['DateRange2'])
-                if date_e > self.date_e:
-                    self.date_e = date_end
-                with open(db_filename, 'wb') as db_file:
-                    pickle.dump(self.date_s, db_file)
-                    pickle.dump(self.date_e, db_file)
-                    pickle.dump(self.db, db_file)
 
+                if converted == 0:  # нет новых данных
                     if self.trace:
-                        print(f'History: сохранили историю в файл \'{self.curr_id}.dat\'')
+                        print('History: Обновления истории нет')
+                    self.date_ask = datetime.date.today()  # когда запрашивали
+                    with open(db_filename, 'wb') as db_file:
+                        pickle.dump(self.date_ask, db_file)
+                        pickle.dump(self.date_s, db_file)
+                        pickle.dump(self.date_e, db_file)
+                        pickle.dump(self.db, db_file)
+                    return resp.status_code
+
+                date_sorted = sorted(self.db.keys())
+                if len(date_sorted):
+                    if self.trace:
+                        print('History: from', date_sorted[0], 'to', date_sorted[-1])
+                    self.date_ask = datetime.date.today()  # когда запрашивали
+                    self.date_s = date_sorted[0]  # первая дата истории
+                    self.date_e = date_sorted[-1]  # последняя дата истории
+                    with open(db_filename, 'wb') as db_file:
+                        pickle.dump(self.date_ask, db_file)
+                        pickle.dump(self.date_s, db_file)
+                        pickle.dump(self.date_e, db_file)
+                        pickle.dump(self.db, db_file)
+
+                        if self.trace:
+                            print(f'History: сохранили историю в файл \'{self.curr_id}.dat\'')
 
             return resp.status_code
 
@@ -98,8 +132,10 @@ class Currency:
             return parser.parse(date_str, dayfirst=True).date()
 
         @staticmethod
-        def cnv_to_float(value: str):
-            return float(value.replace(',', '.'))
+        def str2float(st: str):
+            if not st.replace(',', '').isdigit():
+                return float(0)
+            return float(st.replace(',', '.'))
 
     def __init__(self, for_currency: str, **kwargs):
         self.trace = False
@@ -127,6 +163,14 @@ class Currency:
         return f'Currency({self.__curr_info.__repr__()})'
 
     @property
+    def date_min(self):
+        return self.__rates.date_s
+
+    @property
+    def date_max(self):
+        return self.__rates.date_e
+
+    @property
     def info(self): return self.__curr_info
 
     @property
@@ -152,14 +196,22 @@ class Currency:
         return parser.parse(date_str, dayfirst=True).date()
 
     def __getitem__(self, some):
-        if isinstance(some, datetime.date):
+        if isinstance(some, datetime.date):  # умеем выдавать значение по datetime.data
             _date = some
         elif isinstance(some, str):
-            _date = self.__convert_date(some)
-        elif isinstance(some, slice):
-            return self.__rates.db.__getitem__(some)
+            dates_range = some.split(':')
+            if len(dates_range) == 2:  # умеем выдавать словарь за период из строки '1 dec:' or '01.01:31.01'
+                _date_s = self.__convert_date(dates_range[0]) if len(dates_range[0]) else self.date_min
+                _date_e = self.__convert_date(dates_range[1]) if len(dates_range[1]) else self.date_max
+                slice_dates = list(filter(lambda key: _date_s <= key <= _date_e, self.__rates.db.keys()))
+                return {_date: self.__rates.db[_date] for _date in slice_dates}
+            else:
+                _date = self.__convert_date(some)  # умеем выдавать значение по дате в строке '2 feb 2019'
+        elif isinstance(some, slice):  # умеем выдавать словарь дата:курс по срезу
+            slice_dates = list(self.__rates.db.keys()).__getitem__(some)
+            return {_date: self.__rates.db[_date] for _date in slice_dates}
         else:
-            raise TypeError('Работаем только со строками или datetime.date')
+            raise TypeError('Работаем только с str,str(\':\'),datetime.date,slice')
 
         if _date < self.__rates.date_s or _date > self.__rates.date_e:
             return None
@@ -182,6 +234,9 @@ class Currency:
     def __iter__(self):
         return self.__gen_public()
 
+    def __len__(self):
+        return len(self.__rates.db)
+
 
 if __name__ == '__main__':
 
@@ -193,7 +248,7 @@ if __name__ == '__main__':
         iso_code = curr_info['ISO']
         rus_name = curr_info['RUSNAME']
         curr_num = curr_info['NUM']
-        print(f'Обрабатываем запрос для: Currency(\'{curr_id}\') \'{iso_code}\':{curr_num}:\'{rus_name}\'')
+        print(f'\nОбрабатываем запрос для: Currency(\'{curr_id}\') \'{iso_code}\':{curr_num}:\'{rus_name}\'')
         currencies.append(Currency(curr_id, precision=2, trace=True))
 
     xls_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
