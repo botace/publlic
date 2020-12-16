@@ -36,12 +36,15 @@ class Currency:
             self.db = dict()
             self.load_db()
 
+        def __get_dbfilename(self):
+            return self.arch_dir + f'\\{self.curr_id}.dat'
+
         def load_db(self):
             if not os.path.isdir(self.arch_dir):
                 os.mkdir(self.arch_dir)
-            db_filename = self.arch_dir + f'\\{self.curr_id}.dat'
+            db_filename = self.__get_dbfilename()
             if not os.path.isfile(db_filename):
-                self.update_db(db_filename, datetime.date(1900, 1, 1), datetime.date.today())
+                self.update_db()
             else:
                 with open(db_filename, 'rb') as dbfile:
                     self.date_ask = pickle.load(dbfile)
@@ -54,15 +57,24 @@ class Currency:
                 if self.date_ask < datetime.date.today():
                     if self.trace:
                         print(f'History: Файл с историей устарел - пытаемся обновить историю')
-                    self.update_db(db_filename, self.date_e + datetime.timedelta(days=1), datetime.date.today())
+                    self.update_db()
                 else:
                     if self.trace:
                         print(f'History: Файл с историей актуален')
 
-        def update_db(self, db_filename: str, date_s, date_e):
-            url = r'http://www.cbr.ru/scripts/XML_dynamic.asp'
+        def update_db(self, date_s=None, date_e=None):
+            if date_s is None:
+                date_s = self.date_e + datetime.timedelta(days=1) if self.date_e is not None else datetime.date(1900, 1, 1)
+            if date_e is None:
+                date_e = datetime.date.today()
+            if date_s > date_e:
+                date_s = date_e
+
             date_start = date_s.strftime('%d/%m/%Y')
             date_end = date_e.strftime('%d/%m/%Y')
+
+            db_filename = self.__get_dbfilename()
+            url = r'http://www.cbr.ru/scripts/XML_dynamic.asp'
 
             if self.trace:
                 print(f'History: Запрашиваем историю для {self.curr_id} {date_start}:{date_end} у сервера ЦБ')
@@ -96,7 +108,7 @@ class Currency:
 
                     if self.trace:
                         percent = int(converted / xml_tree_len * 100)
-                        utils.pbprint('History', percent, f'записей {converted}')
+                        utils.pbprint('History:', percent, f'записей {converted}')
 
                 if converted == 0:  # нет новых данных
                     if self.trace:
@@ -155,10 +167,14 @@ class Currency:
 
     @property
     def date_min(self):
+        if self.__rates.date_ask is None:
+            self.__rates.update_db()
         return self.__rates.date_s
 
     @property
     def date_max(self):
+        if self.__rates.date_ask < datetime.date.today():
+            self.__rates.update_db()  # автообновление!
         return self.__rates.date_e
 
     @property
@@ -203,6 +219,10 @@ class Currency:
         else:
             raise TypeError('Работаем только с str и datetime.date')
 
+        # автообновление, если хотят дату за пределами нашей текущей истории
+        if _date_e > self.__rates.date_e and self.__rates.date_ask < datetime.date.today():
+            self.__rates.update_db()
+
         dates = list(filter(lambda key: _date_s <= key <= _date_e, self.__rates.db.keys()))
         return {_date: self.__rates.db[_date] for _date in dates}
 
@@ -216,10 +236,16 @@ class Currency:
             else:
                 _date = self.__convert_date(some)  # умеем выдавать значение по дате в строке '2 feb 2019'
         elif isinstance(some, slice):  # умеем выдавать словарь дата:курс по срезу
+            if self.__rates.date_ask < datetime.date.today():
+                self.__rates.update_db()
             slice_dates = list(self.__rates.db.keys()).__getitem__(some)
             return {_date: self.__rates.db[_date] for _date in slice_dates}
         else:
             raise TypeError('Работаем только с str,str(\':\'),datetime.date,slice')
+
+        # автообновление, если хотят дату за пределами нашей текущей истории
+        if _date > self.__rates.date_e and self.__rates.date_ask < datetime.date.today():
+            self.__rates.update_db()
 
         if _date < self.__rates.date_s or _date > self.__rates.date_e:
             return None
